@@ -7,8 +7,10 @@
 #include "sd-daemon.h"
 
 #include "bus-util.h"
+#include "dissect-image.h"
 #include "install.h"
 #include "main-func.h"
+#include "mount-util.h"
 #include "output-mode.h"
 #include "pager.h"
 #include "parse-argument.h"
@@ -92,6 +94,7 @@ char **arg_wall = NULL;
 const char *arg_kill_who = NULL;
 int arg_signal = SIGTERM;
 char *arg_root = NULL;
+static char *arg_image = NULL;
 usec_t arg_when = 0;
 const char *arg_reboot_argument = NULL;
 enum action arg_action = ACTION_SYSTEMCTL;
@@ -119,6 +122,7 @@ STATIC_DESTRUCTOR_REGISTER(_arg_job_mode, unsetp);
 STATIC_DESTRUCTOR_REGISTER(arg_wall, strv_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_kill_who, unsetp);
 STATIC_DESTRUCTOR_REGISTER(arg_root, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_image, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_reboot_argument, unsetp);
 STATIC_DESTRUCTOR_REGISTER(arg_host, unsetp);
 STATIC_DESTRUCTOR_REGISTER(arg_boot_loader_entry, unsetp);
@@ -402,6 +406,7 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
                 ARG_NO_PAGER,
                 ARG_NO_WALL,
                 ARG_ROOT,
+                ARG_IMAGE,
                 ARG_NO_RELOAD,
                 ARG_KILL_WHO,
                 ARG_NO_ASK_PASSWORD,
@@ -457,6 +462,7 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
                 { "dry-run",             no_argument,       NULL, ARG_DRY_RUN             },
                 { "quiet",               no_argument,       NULL, 'q'                     },
                 { "root",                required_argument, NULL, ARG_ROOT                },
+                { "image",               required_argument, NULL, ARG_IMAGE               },
                 { "force",               no_argument,       NULL, 'f'                     },
                 { "no-reload",           no_argument,       NULL, ARG_NO_RELOAD           },
                 { "kill-who",            required_argument, NULL, ARG_KILL_WHO            },
@@ -659,6 +665,12 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
 
                 case ARG_ROOT:
                         r = parse_path_argument(optarg, false, &arg_root);
+                        if (r < 0)
+                                return r;
+                        break;
+
+                case ARG_IMAGE:
+                        r = parse_path_argument(optarg, /* suppress_root= */ false, &arg_image);
                         if (r < 0)
                                 return r;
                         break;
@@ -930,6 +942,9 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
         if (arg_scope != LOOKUP_SCOPE_SYSTEM)
                 arg_ask_password = false;
 
+        if (arg_root && arg_image)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Please specify either --root= or --image=, the combination of both is not supported.");
+
         if (arg_transport == BUS_TRANSPORT_REMOTE && arg_scope != LOOKUP_SCOPE_SYSTEM)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Cannot access user instance remotely.");
@@ -1113,6 +1128,9 @@ static int systemctl_main(int argc, char *argv[]) {
 }
 
 static int run(int argc, char *argv[]) {
+        _cleanup_(loop_device_unrefp) LoopDevice *loop_device = NULL;
+        _cleanup_(decrypted_image_unrefp) DecryptedImage *decrypted_image = NULL;
+        _cleanup_(umount_and_rmdir_and_freep) char *unlink_dir = NULL;
         int r;
 
         setlocale(LC_ALL, "");
@@ -1132,6 +1150,26 @@ static int run(int argc, char *argv[]) {
                         log_info("Running in chroot, ignoring request.");
                 r = 0;
                 goto finish;
+        }
+
+        /* Open up and mount the image */
+        if (arg_image) {
+                assert(!arg_root);
+
+                r = mount_image_privately_interactively(
+                                arg_image,
+                                /* TODO: determine appropriate flags */
+                                DISSECT_IMAGE_GENERIC_ROOT |
+                                DISSECT_IMAGE_RELAX_VAR_CHECK,
+                                &unlink_dir,
+                                &loop_device,
+                                &decrypted_image);
+                if (r < 0)
+                        return r;
+
+                arg_root = strdup(unlink_dir);
+                if (!arg_root)
+                        return log_oom();
         }
 
         /* systemctl_main() will print an error message for the bus connection, but only if it needs to */
