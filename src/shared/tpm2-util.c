@@ -280,17 +280,15 @@ static int tpm2_make_primary(
                         .type = TPM2_ALG_ECC,
                         .nameAlg = TPM2_ALG_SHA256,
                         .objectAttributes = TPMA_OBJECT_RESTRICTED|TPMA_OBJECT_DECRYPT|TPMA_OBJECT_FIXEDTPM|TPMA_OBJECT_FIXEDPARENT|TPMA_OBJECT_SENSITIVEDATAORIGIN|TPMA_OBJECT_USERWITHAUTH,
-                        .parameters = {
-                                .eccDetail = {
-                                        .symmetric = {
-                                                .algorithm = TPM2_ALG_AES,
-                                                .keyBits.aes = 128,
-                                                .mode.aes = TPM2_ALG_CFB,
-                                        },
-                                        .scheme.scheme = TPM2_ALG_NULL,
-                                        .curveID = TPM2_ECC_NIST_P256,
-                                        .kdf.scheme = TPM2_ALG_NULL,
+                        .parameters.eccDetail = {
+                                .symmetric = {
+                                        .algorithm = TPM2_ALG_AES,
+                                        .keyBits.aes = 128,
+                                        .mode.aes = TPM2_ALG_CFB,
                                 },
+                                .scheme.scheme = TPM2_ALG_NULL,
+                                .curveID = TPM2_ECC_NIST_P256,
+                                .kdf.scheme = TPM2_ALG_NULL,
                         },
                 },
         };
@@ -300,16 +298,14 @@ static int tpm2_make_primary(
                         .type = TPM2_ALG_RSA,
                         .nameAlg = TPM2_ALG_SHA256,
                         .objectAttributes = TPMA_OBJECT_RESTRICTED|TPMA_OBJECT_DECRYPT|TPMA_OBJECT_FIXEDTPM|TPMA_OBJECT_FIXEDPARENT|TPMA_OBJECT_SENSITIVEDATAORIGIN|TPMA_OBJECT_USERWITHAUTH,
-                        .parameters = {
-                                .rsaDetail = {
-                                        .symmetric = {
-                                                .algorithm = TPM2_ALG_AES,
-                                                .keyBits.aes = 128,
-                                                .mode.aes = TPM2_ALG_CFB,
-                                        },
-                                        .scheme.scheme = TPM2_ALG_NULL,
-                                        .keyBits = 2048,
+                        .parameters.rsaDetail = {
+                                .symmetric = {
+                                        .algorithm = TPM2_ALG_AES,
+                                        .keyBits.aes = 128,
+                                        .mode.aes = TPM2_ALG_CFB,
                                 },
+                                .scheme.scheme = TPM2_ALG_NULL,
+                                .keyBits = 2048,
                         },
                 },
         };
@@ -602,7 +598,7 @@ static int tpm2_get_best_pcr_bank(
 
 static int tpm2_make_encryption_session(
                 ESYS_CONTEXT *c,
-                ESYS_TR tpmKey,
+                ESYS_TR primary,
                 ESYS_TR *ret_session) {
 
         static const TPMT_SYM_DEF symmetric = {
@@ -628,7 +624,7 @@ static int tpm2_make_encryption_session(
          * recover the salt, which is then used for key derivation. */
         rc = sym_Esys_StartAuthSession(
                         c,
-                        tpmKey,
+                        primary,
                         ESYS_TR_NONE,
                         ESYS_TR_NONE,
                         ESYS_TR_NONE,
@@ -663,7 +659,7 @@ static int tpm2_make_encryption_session(
 
 static int tpm2_make_pcr_session(
                 ESYS_CONTEXT *c,
-                ESYS_TR tpmKey,
+                ESYS_TR primary,
                 ESYS_TR parent_session,
                 uint32_t pcr_mask,
                 uint16_t pcr_bank, /* If UINT16_MAX, pick best bank automatically, otherwise specify bank explicitly. */
@@ -713,7 +709,7 @@ static int tpm2_make_pcr_session(
 
         rc = sym_Esys_StartAuthSession(
                         c,
-                        tpmKey,
+                        primary,
                         ESYS_TR_NONE,
                         parent_session,
                         ESYS_TR_NONE,
